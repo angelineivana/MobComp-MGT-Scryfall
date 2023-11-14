@@ -1,5 +1,22 @@
 import SwiftUI
 
+struct ItalicText: UIViewRepresentable {
+    let attributedText: NSAttributedString
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.isEditable = false
+        textView.isSelectable = false
+        textView.isUserInteractionEnabled = true
+        textView.backgroundColor = UIColor.clear // Set background color to clear
+        return textView
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        uiView.attributedText = attributedText
+    }
+}
+
 struct SearchBar: View {
     @Binding var searchText: String
 
@@ -15,7 +32,6 @@ struct SearchBar: View {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundColor(.gray)
             }
-            .padding(.trailing, 8)
             .opacity(searchText.isEmpty ? 0 : 1)
         }
         .padding()
@@ -23,86 +39,202 @@ struct SearchBar: View {
 }
 
 struct MTGCardView: View {
-    var card: MTGCard
+    @Binding var card: MTGCard
+    @Binding var currentIndex: Int
+    @Binding var mtgCards: [MTGCard]
+
     @State private var showVersion = false
     @State private var showRuling = false
     @State private var pricingInfo: [CardPricingInfo] = []
-    
-    var body: some View {
-        VStack {
-            // Tampilkan gambar kartu
-            AsyncImage(url: URL(string: card.image_uris?.large ?? "")) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .cornerRadius(10)
-                case .failure:
-                    Image(systemName: "exclamationmark.triangle")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .foregroundColor(.red)
-                case .empty:
-                    ProgressView()
-                @unknown default:
-                    ProgressView()
-                }
-            }
-            
-            // Tampilkan nama kartu
-            Text(card.name)
-                .font(.title)
-//                .padding()
-            Text(card.type_line)
+    @State private var showLargeImage = false
 
-            FrameView {
-                VStack {
-                    Text(card.oracle_text)
-//                        .padding(.trailing)
-                        .background(Color.clear)
-                    Text(card.flavor_text ?? "")
-//                        .padding(.trailing)
-                        .background(Color.clear)
-                }
-            }
-            
-            HStack {
-                Button(action: {
-                    fetchPricingAndLegalities(for: card)
-                    //                    self.showVersion.toggle()
-                }) {
-                    Text("Versions")
-                        .padding()
-                        .foregroundColor(.white)
-                        .background(Color.red)
-                        .cornerRadius(30)
-                }
-                .sheet(isPresented: $showVersion) {
-                    CardPricingListView(pricingInfo: pricingInfo)
-                }
-                .onChange(of: pricingInfo) { _, newPricingInfo in
-                    if !newPricingInfo.isEmpty {
-                        self.showVersion.toggle()
+    var body: some View {
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                // Header image with art_crop
+                ZStack {
+                    AsyncImage(url: URL(string: card.image_uris?.art_crop ?? "")) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(height: geometry.size.height / 3)
+                                .clipped()
+                        case .failure:
+                            Color.gray // Placeholder color or image if loading fails
+                        case .empty:
+                            Color.gray // Placeholder color or image if no data
+                        @unknown default:
+                            Color.gray // Placeholder color or image for unknown cases
+                        }
+                    }
+                    .onTapGesture {
+                        self.showLargeImage.toggle()
+                    }
+                    .sheet(isPresented: $showLargeImage) {
+                        LargeImageView(card: card, imageURL: URL(string: card.image_uris?.large ?? ""))
                     }
                 }
-                
-                Button(action: {
-                    self.showRuling.toggle()
-                }) {
-                    Text("Ruling")
-                        .padding()
-                        .foregroundColor(.white)
-                        .background(Color.red)
-                        .cornerRadius(30)
+
+                // Content of MTGCardView
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(card.name)
+                        .font(.system(size: 24, weight: .bold)) // Adjust font size and weight as needed
+                    Text(card.type_line)
+                        .font(.system(size: 18, weight: .semibold))
+                        .padding(.bottom, 10)
+
+                    FrameView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            parseAndRenderText(card.oracle_text + "\n\n" + (card.flavor_text ?? ""))
+                        }
+                        .padding(10) // Add padding to the VStack, adjust as needed
+                        .background(
+                            RoundedRectangle(cornerRadius: 20) // Adjust the corner radius as needed
+                                .shadow(color: Color.black.opacity(0.3), radius: 5, x: 6, y: 6) // Add a shadow to the background
+                                .foregroundColor(Color.white) // Set the background color to light grey with high opacity
+                        )
+                    }
+
+                    HStack {
+                        // Left arrow button
+                        Button(action: {
+                            if currentIndex > 0 {
+                                currentIndex -= 1
+                                updateCard()
+                            }
+                        }) {
+                            Image(systemName: "arrow.left.circle")
+                                .imageScale(.large)
+                                .foregroundColor(.blue)
+                                .padding()
+                        }
+                        .padding(.trailing, 8)
+
+                        // Versions button
+                        Button(action: {
+                            fetchPricingAndLegalities(for: card)
+                        }) {
+                            Text("Versions")
+                                .padding()
+                                .foregroundColor(.white)
+                                .background(Color.red)
+                                .cornerRadius(30)
+                        }
+                        .sheet(isPresented: $showVersion) {
+                            CardPricingListView(pricingInfo: pricingInfo)
+                        }
+                        .onChange(of: pricingInfo) { _, newPricingInfo in
+                            if !newPricingInfo.isEmpty {
+                                self.showVersion.toggle()
+                            }
+                        }
+
+                        Spacer()
+
+                        // Ruling button
+                        Button(action: {
+                            self.showRuling.toggle()
+                        }) {
+                            Text("Ruling")
+                                .padding()
+                                .foregroundColor(.white)
+                                .background(Color.red)
+                                .cornerRadius(30)
+                        }
+                        .sheet(isPresented: $showRuling) {
+                            LegalitiesView(legalities: card.legalities)
+                        }
+
+                        // Right arrow button
+                        Button(action: {
+                            if currentIndex < mtgCards.count - 1 {
+                                currentIndex += 1
+                                updateCard()
+                            }
+                        }) {
+                            Image(systemName: "arrow.right.circle")
+                                .imageScale(.large)
+                                .foregroundColor(.blue)
+                                .padding()
+                        }
+                        .padding(.leading, 8)
+                        
+                    }
+                    .padding()
+
                 }
-                .sheet(isPresented: $showRuling) {
-                    LegalitiesView(legalities: card.legalities)
+                .background(Color.white)
+                .padding(10)
+            }
+        }
+        .edgesIgnoringSafeArea(.top)
+    }
+
+    private func updateCard() {
+        card = mtgCards[currentIndex]
+    }
+    
+    private func parseAndRenderText(_ text: String) -> some View {
+        let attributedString = NSMutableAttributedString(string: text)
+
+        // Apply a consistent font size to the entire attributed string
+        attributedString.addAttribute(.font, value: UIFont.systemFont(ofSize: 16), range: NSRange(location: 0, length: attributedString.length))
+
+        // Use regular expression to find text inside parentheses and make it italic
+        let regex = try? NSRegularExpression(pattern: "\\((.*?)\\)", options: [])
+        let range = NSRange(location: 0, length: text.utf16.count)
+
+        regex?.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
+            if let matchRange = match?.range(at: 1) {
+                attributedString.addAttribute(.font, value: UIFont.italicSystemFont(ofSize: 16), range: matchRange)
+            }
+        }
+
+        return ItalicText(attributedText: attributedString)
+    }
+
+
+    struct LargeImageView: View {
+        var card: MTGCard
+        var imageURL: URL?
+
+        var body: some View {
+            ZStack {
+                Color.black.opacity(0.8).ignoresSafeArea()
+
+                if let imageURL = imageURL {
+                    AsyncImage(url: imageURL) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .cornerRadius(20)
+                                .padding(20)
+                            
+                            // Display USD price here
+                            Text("$\(card.prices?.usd ?? "N/A")")
+                                .foregroundColor(.white)
+                                .font(.headline)
+                                .padding(.top, 10)
+                        case .failure:
+                            Text("Failed to load image")
+                                .foregroundColor(.white)
+                                .padding()
+                        case .empty:
+                            ProgressView()
+                        @unknown default:
+                            ProgressView()
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .padding()
         }
     }
+
     
     struct CardPricingInfo: Codable, Equatable {
         var name: String
@@ -268,19 +400,17 @@ struct MTGCardView: View {
             HStack {
                 Text(legality == "legal" ? "LEGAL" : "NOT LEGAL")
                     .foregroundColor(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 6)
                     .background(legality == "legal" ? Color.green : Color.gray)
-                    .cornerRadius(8)
+                    .cornerRadius(12)
                 Spacer()
                 Text(format)
             }
-            .font(.system(size: 15, weight: .semibold))
+            .font(.system(size: 14, weight: .semibold))
             .padding(.horizontal)
         }
     }
-
-
 }
 
 
@@ -308,7 +438,7 @@ struct FrameView<Content: View>: View {
     var body: some View {
         content
             .padding(5)
-            .background(Color.gray.opacity(0.2))
+//            .background(Color.white.opacity(0.2))
             .cornerRadius(8)
     }
 }
@@ -318,7 +448,7 @@ struct ContentView: View {
     @State private var mtgCards: [MTGCard] = []
     @State private var searchText = ""
     @State private var isSortingAscending = true
-
+    @State private var currentIndex = 0
 
     let columns: [GridItem] = Array(repeating: .init(.flexible()), count: 3)
 
@@ -343,15 +473,16 @@ struct ContentView: View {
                         }
                     }
                     LazyVGrid(columns: columns, spacing: 16) {
-                        ForEach(mtgCards.filter {
-                            searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(searchText)
-                        }) { card in
-                            NavigationLink(destination: MTGCardView(card: card)) {
-                                CardImageView(card: card)
-                                    .frame(height: 200) // Adjust the image height as needed
+                        ForEach(mtgCards.indices.filter {
+                            searchText.isEmpty || mtgCards[$0].name.localizedCaseInsensitiveContains(searchText)
+                        }, id: \.self) { index in
+                            NavigationLink(destination: MTGCardView(card: $mtgCards[index], currentIndex: $currentIndex, mtgCards: $mtgCards)) {
+                                CardImageView(card: mtgCards[index])
+                                    .frame(height: 220)
                             }
                         }
                     }
+
                     .padding()
                 }
                 .onAppear {
@@ -371,6 +502,42 @@ struct ContentView: View {
 
                 .navigationBarTitle("MTG Cards")
             }
+            .tabItem {
+                Image(systemName: "house")
+                Text("Home")
+            }
+
+            Text("THIS MENU IS IN DEVELOPMENT")
+                .foregroundColor(.red)
+                .font(.system(size: 20, weight: .semibold))
+                .tabItem {
+                    Image(systemName: "magnifyingglass")
+                    Text("Search")
+                }
+
+            Text("THIS MENU IS IN DEVELOPMENT")
+                .foregroundColor(.red)
+                .font(.system(size: 20, weight: .semibold))
+                .tabItem {
+                    Image(systemName: "folder")
+                    Text("Collection")
+                }
+
+            Text("THIS MENU IS IN DEVELOPMENT")
+                .foregroundColor(.red)
+                .font(.system(size: 20, weight: .semibold))
+                .tabItem {
+                    Image(systemName: "square.stack")
+                    Text("Decks")
+                }
+
+            Text("THIS MENU IS IN DEVELOPMENT")
+                .foregroundColor(.red)
+                .font(.system(size: 20, weight: .semibold))
+                .tabItem {
+                    Image(systemName: "camera")
+                    Text("Scan")
+                }
         }
     }
 
@@ -401,22 +568,18 @@ struct ContentView_Previews: PreviewProvider {
 
 struct CardImageView: View {
     var card: MTGCard
-    
+
     var body: some View {
-        ZStack {
+        VStack(spacing: 0) {
             // Frame with a corner radius
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.white)
-                .shadow(radius: 3)
-                .frame(height: 200)
-            
-            VStack {
-                AsyncImage(url: URL(string: card.image_uris?.large ?? "")) { phase in
+            ZStack {
+                AsyncImage(url: URL(string: card.image_uris?.small ?? "")) { phase in
                     switch phase {
                     case .success(let image):
                         image
                             .resizable()
                             .aspectRatio(contentMode: .fit)
+                            .cornerRadius(5)
                     case .failure:
                         Image(systemName: "exclamationmark.triangle")
                             .resizable()
@@ -428,11 +591,18 @@ struct CardImageView: View {
                         ProgressView()
                     }
                 }
-                
-                Text(card.name)
-                    .font(.system(size: 14))
-                    .padding(.top, 8)
             }
+            .frame(height: 200) // Adjust the height as needed
+//            .cornerRadius(8)
+
+            // Text with adjusted padding and line limit
+            Text(card.name)
+                .font(.system(size: 14)) // Adjust font size and weight as needed
+                .foregroundColor(.black)
+                .lineLimit(2) // Display up to 2 lines of text
+                .multilineTextAlignment(.center) // Center-align the text
+                .frame(maxWidth: .infinity, alignment: .top) // Expand to fill the width
         }
+        .padding(.top, 10)
     }
 }

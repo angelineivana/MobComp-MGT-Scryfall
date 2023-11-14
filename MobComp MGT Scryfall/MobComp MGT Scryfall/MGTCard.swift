@@ -51,6 +51,9 @@ struct MTGCard: Codable, Identifiable {
         var small: String?
         var normal: String?
         var large: String?
+        var png:String?
+        var art_crop: String?
+        var border_crop: String?
     }
 }
 
