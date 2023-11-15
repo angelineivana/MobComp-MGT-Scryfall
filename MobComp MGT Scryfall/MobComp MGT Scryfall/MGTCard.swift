@@ -1,7 +1,7 @@
 // MTGCard.swift
 import Foundation
 
-struct MTGCard: Codable, Identifiable {
+struct MTGCard: Codable, Identifiable, Hashable, Equatable {
     var id: UUID
     var name: String
     var type_line: String
@@ -13,11 +13,11 @@ struct MTGCard: Codable, Identifiable {
     var lang: String?
     var prices: Prices?
     var legalities: Legality?
-
+    
     struct Prices: Codable {
         var usd: String?
         var usd_foil: String?
-        var usd_etched: String?  
+        var usd_etched: String?
         var eur: String?
         var eur_foil: String?
         var tix: String?
@@ -46,7 +46,7 @@ struct MTGCard: Codable, Identifiable {
         var predh: String?
         var premodern: String?
     }
-
+    
     struct ImageURIs: Codable {
         var small: String?
         var normal: String?
@@ -55,6 +55,16 @@ struct MTGCard: Codable, Identifiable {
         var art_crop: String?
         var border_crop: String?
     }
+    static func == (lhs: MTGCard, rhs: MTGCard) -> Bool {
+        // Implement equality check based on your requirements
+        return lhs.id == rhs.id
+    }
+
+    func hash(into hasher: inout Hasher) {
+        // Implement hash function based on your requirements
+        hasher.combine(id)
+    }
+
 }
 
 struct MTGCardList: Codable {

@@ -42,11 +42,13 @@ struct MTGCardView: View {
     @Binding var card: MTGCard
     @Binding var currentIndex: Int
     @Binding var mtgCards: [MTGCard]
+    @Binding var selectedCard: MTGCard?
 
     @State private var showVersion = false
     @State private var showRuling = false
     @State private var pricingInfo: [CardPricingInfo] = []
     @State private var showLargeImage = false
+    
 
     var body: some View {
         GeometryReader { geometry in
@@ -92,8 +94,8 @@ struct MTGCardView: View {
                         .padding(10) // Add padding to the VStack, adjust as needed
                         .background(
                             RoundedRectangle(cornerRadius: 20) // Adjust the corner radius as needed
-                                .shadow(color: Color.black.opacity(0.3), radius: 5, x: 6, y: 6) // Add a shadow to the background
-                                .foregroundColor(Color.white) // Set the background color to light grey with high opacity
+                                .foregroundColor(Color.pink.opacity(0.2)) // Set the background color to light grey with high opacity
+                                .shadow(color: Color.black.opacity(0.7), radius: 5, x: 6, y: 6) // Add a shadow to the background
                         )
                     }
 
@@ -102,13 +104,14 @@ struct MTGCardView: View {
                         Button(action: {
                             if currentIndex > 0 {
                                 currentIndex -= 1
-                                updateCard()
+                                selectedCard = mtgCards[currentIndex]
                             }
                         }) {
                             Image(systemName: "arrow.left.circle")
                                 .imageScale(.large)
-                                .foregroundColor(.blue)
+                                .foregroundColor(.pink)
                                 .padding()
+                                .opacity(currentIndex > 0 ? 1 : 0) // <-- Update opacity based on index
                         }
                         .padding(.trailing, 8)
 
@@ -119,7 +122,7 @@ struct MTGCardView: View {
                             Text("Versions")
                                 .padding()
                                 .foregroundColor(.white)
-                                .background(Color.red)
+                                .background(Color.accentColor.opacity(0.6))
                                 .cornerRadius(30)
                         }
                         .sheet(isPresented: $showVersion) {
@@ -140,7 +143,7 @@ struct MTGCardView: View {
                             Text("Ruling")
                                 .padding()
                                 .foregroundColor(.white)
-                                .background(Color.red)
+                                .background(Color.accentColor.opacity(0.6))
                                 .cornerRadius(30)
                         }
                         .sheet(isPresented: $showRuling) {
@@ -151,30 +154,37 @@ struct MTGCardView: View {
                         Button(action: {
                             if currentIndex < mtgCards.count - 1 {
                                 currentIndex += 1
-                                updateCard()
+                                selectedCard = mtgCards[currentIndex]
                             }
                         }) {
                             Image(systemName: "arrow.right.circle")
                                 .imageScale(.large)
-                                .foregroundColor(.blue)
+                                .foregroundColor(.pink)
                                 .padding()
+                                .opacity(currentIndex < mtgCards.count - 1 ? 1 : 0) // <-- Update opacity based on index
                         }
                         .padding(.leading, 8)
-                        
                     }
                     .padding()
+//                    .onAppear {
+//                        if let index = mtgCards.firstIndex(where: { $0.id == card.id }) {
+//                            currentIndex = index
+//                        }
+//                    }
 
                 }
                 .background(Color.white)
                 .padding(10)
+                .onAppear {
+                    if let index = mtgCards.firstIndex(where: { $0.id == card.id }) {
+                        currentIndex = index
+                    }
+                }
             }
         }
         .edgesIgnoringSafeArea(.top)
     }
-
-    private func updateCard() {
-        card = mtgCards[currentIndex]
-    }
+    
     
     private func parseAndRenderText(_ text: String) -> some View {
         let attributedString = NSMutableAttributedString(string: text)
@@ -265,8 +275,9 @@ struct MTGCardView: View {
 
         var body: some View {
             Text("Pricing Information")
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: 24, weight: .bold)) // Adjust font size and weight as needed
                 .padding(.top, 24)
+
             VStack {
                 List(pricingInfo, id: \.name) { info in
                     VStack(alignment: .leading) {
@@ -284,7 +295,7 @@ struct MTGCardView: View {
                         }
                     }
                     .padding()
-                    .background(Color.gray.opacity(0.2))
+                    .background(Color.accentColor.opacity(0.2))
                     .cornerRadius(8)
                     .padding(.vertical, 8)
                 }
@@ -294,6 +305,10 @@ struct MTGCardView: View {
     }
 
     func fetchPricingAndLegalities(for card: MTGCard) {
+        if let index = mtgCards.firstIndex(where: { $0.id == card.id }) {
+            currentIndex = index
+        }
+
         pricingInfo = [
             CardPricingInfo(
                 name: card.name,
@@ -310,17 +325,17 @@ struct MTGCardView: View {
             )
         ]
     }
+
     
     struct LegalitiesView: View {
         var legalities: MTGCard.Legality?
 
         var body: some View {
+            Text("Legalities")
+                .font(.system(size: 24, weight: .bold)) // Adjust font size and weight as needed
+                .padding(.top, 24)
+
             VStack(alignment: .leading, spacing: 8) {
-                Text("LEGALITIES")
-                    .foregroundColor(.red)
-                    .font(.system(size: 20, weight: .bold))
-                .padding(.horizontal)
-                
                 ScrollView {
                     if let standard = legalities?.standard {
                         LegalitiesRow(format: "Standard", legality: standard)
@@ -400,14 +415,17 @@ struct MTGCardView: View {
             HStack {
                 Text(legality == "legal" ? "LEGAL" : "NOT LEGAL")
                     .foregroundColor(.white)
-                    .padding(.horizontal, 13)
+                    .padding(.horizontal, 25)
                     .padding(.vertical, 6)
                     .background(legality == "legal" ? Color.green : Color.gray)
                     .cornerRadius(12)
+                    .font(.system(size: 15, weight: .semibold))
+
                 Spacer()
                 Text(format)
+                    .font(.system(size: 18, weight: .semibold))
+
             }
-            .font(.system(size: 14, weight: .semibold))
             .padding(.horizontal)
         }
     }
@@ -449,6 +467,7 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var isSortingAscending = true
     @State private var currentIndex = 0
+    @State private var selectedCard: MTGCard?
 
     let columns: [GridItem] = Array(repeating: .init(.flexible()), count: 3)
 
@@ -476,12 +495,18 @@ struct ContentView: View {
                         ForEach(mtgCards.indices.filter {
                             searchText.isEmpty || mtgCards[$0].name.localizedCaseInsensitiveContains(searchText)
                         }, id: \.self) { index in
-                            NavigationLink(destination: MTGCardView(card: $mtgCards[index], currentIndex: $currentIndex, mtgCards: $mtgCards)) {
+                            NavigationLink(
+                                destination: MTGCardView(card: $mtgCards[index], currentIndex: $currentIndex, mtgCards: $mtgCards, selectedCard: $selectedCard),
+                                tag: mtgCards[index],  // Use the MTGCard itself as a unique identifier
+                                selection: $selectedCard
+                            ) {
                                 CardImageView(card: mtgCards[index])
                                     .frame(height: 220)
                             }
                         }
                     }
+
+
 
                     .padding()
                 }
