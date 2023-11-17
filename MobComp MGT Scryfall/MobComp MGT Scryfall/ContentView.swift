@@ -48,7 +48,41 @@ struct MTGCardView: View {
     @State private var showRuling = false
     @State private var pricingInfo: [CardPricingInfo] = []
     @State private var showLargeImage = false
+    @State private var isImagePopupVisible = false
+    @State private var isArtCrop = true
+    @State private var showLegalities = false
+    @State private var legalitiesViewHeight: CGFloat = 0
+
+    let manaCostImageMapping: [String: String] = [
+        "1": "satuh",
+        "2": "dua",
+        "3": "tiga",
+        "4": "empat",
+        "W": "matahari",
+        "7": "tujuh",
+        "U": "air",
+        "R": "api",
+        "B": "tengkorak",
+        "G": "pohon"
+    ]
     
+    private func extractManaSymbols(from manaCost: String) -> [String] {
+        let regex = try? NSRegularExpression(pattern: "\\{(.*?)\\}", options: [])
+        let range = NSRange(location: 0, length: manaCost.utf16.count)
+
+        var symbols: [String] = []
+
+        regex?.enumerateMatches(in: manaCost, options: [], range: range) { match, _, _ in
+            if let matchRange = match?.range(at: 1),
+                let swiftRange = Range(matchRange, in: manaCost) {
+                let symbol = String(manaCost[swiftRange])
+                symbols.append(symbol)
+            }
+        }
+
+        return symbols
+    }
+
 
     var body: some View {
         GeometryReader { geometry in
@@ -60,29 +94,56 @@ struct MTGCardView: View {
                         case .success(let image):
                             image
                                 .resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .frame(height: geometry.size.height / 3)
-                                .clipped()
+                                .aspectRatio(contentMode: .fit)
                         case .failure:
-                            Color.gray // Placeholder color or image if loading fails
+                            Image(systemName: "exclamationmark.triangle")
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .foregroundColor(.red)
                         case .empty:
-                            Color.gray // Placeholder color or image if no data
+                            ProgressView()
                         @unknown default:
-                            Color.gray // Placeholder color or image for unknown cases
+                            ProgressView()
                         }
                     }
                     .onTapGesture {
-                        self.showLargeImage.toggle()
-                    }
-                    .sheet(isPresented: $showLargeImage) {
-                        LargeImageView(card: card, imageURL: URL(string: card.image_uris?.large ?? ""))
+                        print("Image URL: \(card.image_uris?.art_crop ?? "")")
+                        isImagePopupVisible.toggle()
                     }
                 }
-
                 // Content of MTGCardView
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(card.name)
-                        .font(.system(size: 24, weight: .bold)) // Adjust font size and weight as needed
+                    HStack {
+                        Text(card.name)
+                            .font(.system(size: 24, weight: .bold)) // Adjust font size and weight as needed
+                        Spacer() // Add Spacer to push mana_cost to the right side
+                        
+                        let symbols = extractManaSymbols(from: card.mana_cost)
+
+                        // Display mana_cost images
+                        ForEach(symbols, id: \.self) { symbol in
+                            if let manaCostImageName = manaCostImageMapping[symbol] {
+                                if let image = UIImage(named: manaCostImageName) {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(width: 20, height: 20)
+                                        .padding(.trailing, 4)
+                                } else {
+                                    // Display an error message if the image is not found
+                                    Text("Error: Image '\(manaCostImageName)' not found!")
+                                        .foregroundColor(.red)  // You can customize the color
+                                        .padding(.trailing, 4)
+                                }
+                            } else {
+                                // Display an error message if the mapping is not found
+                                Text("Error: Mapping not found for symbol '\(symbol)'")
+                                    .foregroundColor(.red)  // You can customize the color
+                                    .padding(.trailing, 4)
+                            }
+                        }
+
+                    }
                     Text(card.type_line)
                         .font(.system(size: 18, weight: .semibold))
                         .padding(.bottom, 10)
@@ -94,7 +155,7 @@ struct MTGCardView: View {
                         .padding(10) // Add padding to the VStack, adjust as needed
                         .background(
                             RoundedRectangle(cornerRadius: 20) // Adjust the corner radius as needed
-                                .foregroundColor(Color.pink.opacity(0.2)) // Set the background color to light grey with high opacity
+                                .foregroundColor(Color.white.opacity(0.2)) // Set the background color to light grey with high opacity
                                 .shadow(color: Color.black.opacity(0.7), radius: 5, x: 6, y: 6) // Add a shadow to the background
                         )
                     }
@@ -109,7 +170,7 @@ struct MTGCardView: View {
                         }) {
                             Image(systemName: "arrow.left.circle")
                                 .imageScale(.large)
-                                .foregroundColor(.pink)
+                                .foregroundColor(.black)
                                 .padding()
                                 .opacity(currentIndex > 0 ? 1 : 0) // <-- Update opacity based on index
                         }
@@ -118,6 +179,9 @@ struct MTGCardView: View {
                         // Versions button
                         Button(action: {
                             fetchPricingAndLegalities(for: card)
+                            // Toggle the showVersion directly without using a sheet
+                            self.showVersion.toggle()
+                            self.showLegalities = false
                         }) {
                             Text("Versions")
                                 .padding()
@@ -125,20 +189,32 @@ struct MTGCardView: View {
                                 .background(Color.accentColor.opacity(0.6))
                                 .cornerRadius(30)
                         }
-                        .sheet(isPresented: $showVersion) {
-                            CardPricingListView(pricingInfo: pricingInfo)
+                        .onAppear {
+                            // Perform the action when the MTGCardView appears
+                            fetchPricingAndLegalities(for: card)
+                            self.showVersion.toggle()
+                            self.showLegalities = false
                         }
-                        .onChange(of: pricingInfo) { _, newPricingInfo in
-                            if !newPricingInfo.isEmpty {
-                                self.showVersion.toggle()
+                        .background(GeometryReader { proxy in
+                            Color.clear.onAppear {
+                                let pricingViewHeight = proxy.frame(in: .global).size.height
+                                // Pass the height information to the legalities view
+                                self.legalitiesViewHeight = pricingViewHeight
                             }
-                        }
+                        })
+                        //
+//                        .onChange(of: pricingInfo) { _, newPricingInfo in
+//                            if !newPricingInfo.isEmpty {
+//                                self.showVersion.toggle()
+//                            }
+//                        }
 
                         Spacer()
 
                         // Ruling button
                         Button(action: {
-                            self.showRuling.toggle()
+                            self.showLegalities.toggle()
+                            self.showVersion = false
                         }) {
                             Text("Ruling")
                                 .padding()
@@ -146,10 +222,7 @@ struct MTGCardView: View {
                                 .background(Color.accentColor.opacity(0.6))
                                 .cornerRadius(30)
                         }
-                        .sheet(isPresented: $showRuling) {
-                            LegalitiesView(legalities: card.legalities)
-                        }
-
+                        
                         // Right arrow button
                         Button(action: {
                             if currentIndex < mtgCards.count - 1 {
@@ -159,13 +232,70 @@ struct MTGCardView: View {
                         }) {
                             Image(systemName: "arrow.right.circle")
                                 .imageScale(.large)
-                                .foregroundColor(.pink)
+                                .foregroundColor(.black)
                                 .padding()
                                 .opacity(currentIndex < mtgCards.count - 1 ? 1 : 0) // <-- Update opacity based on index
                         }
                         .padding(.leading, 8)
                     }
                     .padding()
+                    .gesture(
+                        DragGesture()
+                            .onEnded { value in
+                                if value.translation.width > 100 {
+                                    // Swipe right, navigate to the previous card
+                                    if currentIndex > 0 {
+                                        currentIndex -= 1
+                                        selectedCard = mtgCards[currentIndex]
+                                    }
+                                } else if value.translation.width < -100 {
+                                    // Swipe left, navigate to the next card
+                                    if currentIndex < mtgCards.count - 1 {
+                                        currentIndex += 1
+                                        selectedCard = mtgCards[currentIndex]
+                                    }
+                                }
+                            }
+                    )
+
+                    // Display legalities information directly in the view
+                    if showLegalities && !showVersion {
+                        LegalitiesView(legalities: card.legalities)
+//                            .padding()
+                            .background(Color.white)
+                            .cornerRadius(10)
+                            .padding(.bottom, 10)
+                    }
+                    
+                    // Display pricing information directly in the view
+                    if showVersion && !showLegalities {
+                        VStack(alignment: .leading) {
+//                            Text("Price Information")
+//                                .font(.system(size: 18, weight: .bold))
+//                            // Display pricing information
+                            ForEach(pricingInfo, id: \.name) { info in
+                                VStack(alignment: .leading) {
+                                    Text("\(info.set): \(info.name)")
+                                        .font(.headline)
+
+                                    Text("#1 · \(info.rarity) · \(info.language) · Nonfoil/Foil")
+                                        .foregroundColor(.gray)
+                                    HStack {
+                                        Text("USD: \(info.prices.usd)")
+                                        Spacer()
+                                        Text("EUR: \(info.prices.eur)")
+                                        Spacer()
+                                        Text("TIX: \(info.prices.tix)")
+                                    }
+                                }
+                                .padding()
+                                .background(Color.accentColor.opacity(0.2))
+                                .cornerRadius(8)
+                            }
+                            .padding()
+                        }
+                    }
+
 //                    .onAppear {
 //                        if let index = mtgCards.firstIndex(where: { $0.id == card.id }) {
 //                            currentIndex = index
@@ -181,6 +311,43 @@ struct MTGCardView: View {
                     }
                 }
             }
+            .overlay(
+                isImagePopupVisible ? AnyView(
+                    ZStack {
+                        Color.black.opacity(0.5).ignoresSafeArea()
+
+                        VStack {
+                            if let largeImageUrl = URL(string: card.image_uris?.normal ?? "") {
+                                AsyncImage(url: largeImageUrl) { phase in
+                                    switch phase {
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fit)
+                                            .cornerRadius(20)
+                                    case .failure:
+                                        Text("Failed to load image")
+                                    case .empty:
+                                        ProgressView()
+                                    @unknown default:
+                                        ProgressView()
+                                    }
+                                }
+                            }
+                            Text("$\(card.prices?.usd ?? "N/A")")
+                                .foregroundColor(.white)
+                                .font(.headline)
+                                .padding(.top, 10)
+                        }
+                        .padding(.top, 15)
+                        .padding(20)
+
+                    }
+                    .onTapGesture {
+                        isImagePopupVisible.toggle()
+                    }
+                ) : AnyView(EmptyView())
+            )
         }
         .edgesIgnoringSafeArea(.top)
     }
@@ -192,59 +359,26 @@ struct MTGCardView: View {
         // Apply a consistent font size to the entire attributed string
         attributedString.addAttribute(.font, value: UIFont.systemFont(ofSize: 16), range: NSRange(location: 0, length: attributedString.length))
 
-        // Use regular expression to find text inside parentheses and make it italic
-        let regex = try? NSRegularExpression(pattern: "\\((.*?)\\)", options: [])
+        // Use regular expression to find text inside curly braces and replace mana cost symbols
+        let regex = try? NSRegularExpression(pattern: "\\{(.*?)\\}", options: [])
         let range = NSRange(location: 0, length: text.utf16.count)
 
         regex?.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
-            if let matchRange = match?.range(at: 1) {
-                attributedString.addAttribute(.font, value: UIFont.italicSystemFont(ofSize: 16), range: matchRange)
+            if let matchRange = match?.range(at: 1),
+                let swiftRange = Range(matchRange, in: text) {
+                let symbol = String(text[swiftRange])
+                if let manaCostImageName = manaCostImageMapping[symbol], let image = UIImage(named: manaCostImageName) {
+                    let attachment = NSTextAttachment()
+                    attachment.image = image
+                    attachment.bounds = CGRect(x: 0, y: -4, width: 20, height: 20)
+                    let imageString = NSAttributedString(attachment: attachment)
+                    attributedString.replaceCharacters(in: matchRange, with: imageString)
+                }
             }
         }
 
         return ItalicText(attributedText: attributedString)
     }
-
-
-    struct LargeImageView: View {
-        var card: MTGCard
-        var imageURL: URL?
-
-        var body: some View {
-            ZStack {
-                Color.black.opacity(0.8).ignoresSafeArea()
-
-                if let imageURL = imageURL {
-                    AsyncImage(url: imageURL) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .cornerRadius(20)
-                                .padding(20)
-                            
-                            // Display USD price here
-                            Text("$\(card.prices?.usd ?? "N/A")")
-                                .foregroundColor(.white)
-                                .font(.headline)
-                                .padding(.top, 10)
-                        case .failure:
-                            Text("Failed to load image")
-                                .foregroundColor(.white)
-                                .padding()
-                        case .empty:
-                            ProgressView()
-                        @unknown default:
-                            ProgressView()
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-        }
-    }
-
     
     struct CardPricingInfo: Codable, Equatable {
         var name: String
@@ -267,40 +401,6 @@ struct MTGCardView: View {
                    lhs.rarity == rhs.rarity &&
                    lhs.language == rhs.language &&
                    lhs.prices == rhs.prices
-        }
-    }
-
-    struct CardPricingListView: View {
-        var pricingInfo: [CardPricingInfo]
-
-        var body: some View {
-            Text("Pricing Information")
-                .font(.system(size: 24, weight: .bold)) // Adjust font size and weight as needed
-                .padding(.top, 24)
-
-            VStack {
-                List(pricingInfo, id: \.name) { info in
-                    VStack(alignment: .leading) {
-                        Text("\(info.set): \(info.name)")
-                            .font(.headline)
-
-                        Text("#1 · \(info.rarity) · \(info.language) · Nonfoil/Foil")
-                            .foregroundColor(.gray)
-                        HStack {
-                            Text("USD: \(info.prices.usd)")
-                            Spacer()
-                            Text("EUR: \(info.prices.eur)")
-                            Spacer()
-                            Text("TIX: \(info.prices.tix)")
-                        }
-                    }
-                    .padding()
-                    .background(Color.accentColor.opacity(0.2))
-                    .cornerRadius(8)
-                    .padding(.vertical, 8)
-                }
-                .padding()
-            }
         }
     }
 
@@ -331,79 +431,83 @@ struct MTGCardView: View {
         var legalities: MTGCard.Legality?
 
         var body: some View {
-            Text("Legalities")
-                .font(.system(size: 24, weight: .bold)) // Adjust font size and weight as needed
-                .padding(.top, 24)
-
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading) {
+                Text("Legalities")
+                    .font(.system(size: 18, weight: .bold))
                 ScrollView {
-                    if let standard = legalities?.standard {
-                        LegalitiesRow(format: "Standard", legality: standard)
-                    }
-                    if let future = legalities?.future {
-                        LegalitiesRow(format: "Future", legality: future)
-                    }
-                    if let historic = legalities?.historic {
-                        LegalitiesRow(format: "Historic", legality: historic)
-                    }
-                    if let gladiator = legalities?.gladiator {
-                        LegalitiesRow(format: "Gladiator", legality: gladiator)
-                    }
-                    if let pioneer = legalities?.pioneer {
-                        LegalitiesRow(format: "Pioneer", legality: pioneer)
-                    }
-                    if let explorer = legalities?.explorer {
-                        LegalitiesRow(format: "Explorer", legality: explorer)
-                    }
-                    if let modern = legalities?.modern {
-                        LegalitiesRow(format: "Modern", legality: modern)
-                    }
-                    if let legacy = legalities?.legacy {
-                        LegalitiesRow(format: "Legacy", legality: legacy)
-                    }
-                    if let pauper = legalities?.pauper {
-                        LegalitiesRow(format: "Pauper", legality: pauper)
-                    }
-                    if let vintage = legalities?.vintage {
-                        LegalitiesRow(format: "Vintage", legality: vintage)
-                    }
-                    if let penny = legalities?.penny {
-                        LegalitiesRow(format: "Penny", legality: penny)
-                    }
-                    if let commander = legalities?.commander {
-                        LegalitiesRow(format: "Commander", legality: commander)
-                    }
-                    if let oathbreaker = legalities?.oathbreaker {
-                        LegalitiesRow(format: "Oathbreaker", legality: oathbreaker)
-                    }
-                    if let brawl = legalities?.brawl {
-                        LegalitiesRow(format: "Brawl", legality: brawl)
-                    }
-                    if let historicbrawl = legalities?.historicbrawl {
-                        LegalitiesRow(format: "Historic Brawl", legality: historicbrawl)
-                    }
-                    if let alchemy = legalities?.alchemy {
-                        LegalitiesRow(format: "Alchemy", legality: alchemy)
-                    }
-                    if let paupercommander = legalities?.paupercommander {
-                        LegalitiesRow(format: "Pauper Commander", legality: paupercommander)
-                    }
-                    if let duel = legalities?.duel {
-                        LegalitiesRow(format: "Duel", legality: duel)
-                    }
-                    if let oldschool = legalities?.oldschool {
-                        LegalitiesRow(format: "Old School", legality: oldschool)
-                    }
-                    if let premodern = legalities?.premodern {
-                        LegalitiesRow(format: "Premodern", legality: premodern)
-                    }
-                    if let predh = legalities?.predh {
-                        LegalitiesRow(format: "Prismatic", legality: predh)
+                    HStack {
+                        VStack {
+                            if let standard = legalities?.standard {
+                                LegalitiesRow(format: "Standard", legality: standard)
+                            }
+                            if let future = legalities?.future {
+                                LegalitiesRow(format: "Future", legality: future)
+                            }
+                            if let historic = legalities?.historic {
+                                LegalitiesRow(format: "Historic", legality: historic)
+                            }
+                            if let gladiator = legalities?.gladiator {
+                                LegalitiesRow(format: "Gladiator", legality: gladiator)
+                            }
+                            if let pioneer = legalities?.pioneer {
+                                LegalitiesRow(format: "Pioneer", legality: pioneer)
+                            }
+                            if let explorer = legalities?.explorer {
+                                LegalitiesRow(format: "Explorer", legality: explorer)
+                            }
+                            if let modern = legalities?.modern {
+                                LegalitiesRow(format: "Modern", legality: modern)
+                            }
+                            if let legacy = legalities?.legacy {
+                                LegalitiesRow(format: "Legacy", legality: legacy)
+                            }
+                            if let pauper = legalities?.pauper {
+                                LegalitiesRow(format: "Pauper", legality: pauper)
+                            }
+                            if let vintage = legalities?.vintage {
+                                LegalitiesRow(format: "Vintage", legality: vintage)
+                            }
+                            if let penny = legalities?.penny {
+                                LegalitiesRow(format: "Penny", legality: penny)
+                            }
+                        }
+                        VStack {
+                            if let commander = legalities?.commander {
+                                LegalitiesRow(format: "Commander", legality: commander)
+                            }
+                            if let oathbreaker = legalities?.oathbreaker {
+                                LegalitiesRow(format: "Oathbreaker", legality: oathbreaker)
+                            }
+                            if let brawl = legalities?.brawl {
+                                LegalitiesRow(format: "Brawl", legality: brawl)
+                            }
+                            if let historicbrawl = legalities?.historicbrawl {
+                                LegalitiesRow(format: "Historic Brawl", legality: historicbrawl)
+                            }
+                            if let alchemy = legalities?.alchemy {
+                                LegalitiesRow(format: "Alchemy", legality: alchemy)
+                            }
+                            if let paupercommander = legalities?.paupercommander {
+                                LegalitiesRow(format: "Pauper Commander", legality: paupercommander)
+                            }
+                            if let duel = legalities?.duel {
+                                LegalitiesRow(format: "Duel", legality: duel)
+                            }
+                            if let oldschool = legalities?.oldschool {
+                                LegalitiesRow(format: "Old School", legality: oldschool)
+                            }
+                            if let premodern = legalities?.premodern {
+                                LegalitiesRow(format: "Premodern", legality: premodern)
+                            }
+                            if let predh = legalities?.predh {
+                                LegalitiesRow(format: "Prismatic", legality: predh)
+                            }
+                        }
                     }
                 }
-                
+        
             }
-            .padding()
+//            .padding()
         }
     }
 
@@ -415,36 +519,22 @@ struct MTGCardView: View {
             HStack {
                 Text(legality == "legal" ? "LEGAL" : "NOT LEGAL")
                     .foregroundColor(.white)
-                    .padding(.horizontal, 25)
+                    .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(legality == "legal" ? Color.green : Color.gray)
                     .cornerRadius(12)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 9, weight: .semibold))
+//                    .frame(maxWidth: .infinity)
 
                 Spacer()
                 Text(format)
-                    .font(.system(size: 18, weight: .semibold))
-
+                    .font(.system(size: 12, weight: .semibold))
+                    .multilineTextAlignment(.trailing)
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 4)
         }
     }
 }
-
-
-
-//struct ExplanationView: View {
-//    var explanation: String
-//    var title: String
-//
-//    var body: some View {
-//        // Customize the appearance of the explanation view
-//        VStack {
-//            Text("Test")
-//            Spacer()
-//        }
-//    }
-//}
 
 struct FrameView<Content: View>: View {
     let content: Content
@@ -456,11 +546,9 @@ struct FrameView<Content: View>: View {
     var body: some View {
         content
             .padding(5)
-//            .background(Color.white.opacity(0.2))
             .cornerRadius(8)
     }
 }
-
 
 struct ContentView: View {
     @State private var mtgCards: [MTGCard] = []
@@ -468,6 +556,11 @@ struct ContentView: View {
     @State private var isSortingAscending = true
     @State private var currentIndex = 0
     @State private var selectedCard: MTGCard?
+    @State private var sortByAlphabet = true
+    @State private var sortByNumber = false
+    @State private var isSortingAlphabetAscending = true
+    @State private var isSortingNumberAscending = true
+
 
     let columns: [GridItem] = Array(repeating: .init(.flexible()), count: 3)
 
@@ -475,22 +568,63 @@ struct ContentView: View {
         TabView {
             NavigationView {
                 ScrollView {
-                    HStack {
-                        // Search Bar
-                        SearchBar(searchText: $searchText)
-//                            .padding()
-
+                    // Search Bar
+                    SearchBar(searchText: $searchText)
+                        .padding(.leading, 10)
+                    VStack(alignment: .leading) {
                         // Sort Button
-                        Button(action: {
-                            isSortingAscending.toggle()
-                            sortMTGCardsByName()
-                        }) {
-                            Text("Sort")
-                            Image(systemName: isSortingAscending ? "arrow.up" : "arrow.down")
-                                .imageScale(.large)
-                                .padding()
+                        Text("Sort By")
+                            .font(.system(size: 18, weight: .semibold)) // Adjust font size and weight as needed
+//                            .padding(.top, 10)
+                            .padding(.leading, 2) // Add leading padding for alignment
+
+                        HStack {
+                            Button(action: {
+                                sortByAlphabet.toggle()
+                                sortByNumber = false
+                                isSortingAlphabetAscending.toggle()
+                                sortMTGCards()
+                            }) {
+                                Text("Alphabet")
+                                    .padding(.vertical, 8) // Adjust vertical padding for a smaller height
+                                    .padding(.horizontal, 12) // Adjust horizontal padding
+                                    .foregroundColor(sortByAlphabet ? .white : .black)
+                                    .background(sortByAlphabet ? Color.accentColor.opacity(0.6) : Color.clear)
+                                    .cornerRadius(30)
+                            }
+
+                            Button(action: {
+                                sortByNumber.toggle()
+                                sortByAlphabet = false
+                                isSortingNumberAscending.toggle()
+                                sortMTGCards()
+                            }) {
+                                Text("Collector Number")
+                                    .padding(.vertical, 8) // Adjust vertical padding for a smaller height
+                                    .padding(.horizontal, 12) // Adjust horizontal padding
+                                    .foregroundColor(sortByNumber ? .white : .black)
+                                    .background(sortByNumber ? Color.accentColor.opacity(0.6) : Color.clear)
+                                    .cornerRadius(30)
+                            }
+                            // Button for toggling sorting order
+                            Button(action: {
+                                if sortByAlphabet {
+                                    isSortingAlphabetAscending.toggle()
+                                } else if sortByNumber {
+                                    isSortingNumberAscending.toggle()
+                                }
+                                sortMTGCards()
+                            }) {
+                                Text("↑↓")
+                                    .padding()
+                                    .foregroundColor(.blue)
+                            }
                         }
+//                        .padding(.leading, 16) // Add leading padding for alignment
                     }
+                
+
+//                    .padding(.horizontal, 16)
                     LazyVGrid(columns: columns, spacing: 16) {
                         ForEach(mtgCards.indices.filter {
                             searchText.isEmpty || mtgCards[$0].name.localizedCaseInsensitiveContains(searchText)
@@ -503,6 +637,10 @@ struct ContentView: View {
                                 CardImageView(card: mtgCards[index])
                                     .frame(height: 220)
                             }
+//                            .onDisappear {
+//                                selectedCard = nil
+//                            }
+
                         }
                     }
 
@@ -578,11 +716,19 @@ struct ContentView: View {
         return nil
     }
     
-    func sortMTGCardsByName() {
-        mtgCards.sort(by: { card1, card2 in
-            isSortingAscending ? card1.name < card2.name : card1.name > card2.name
-        })
+    func sortMTGCards() {
+        if sortByAlphabet {
+            mtgCards.sort { (card1, card2) in
+                let result = card1.name.localizedCaseInsensitiveCompare(card2.name)
+                return isSortingAlphabetAscending ? result == .orderedAscending : result == .orderedDescending
+            }
+        } else if sortByNumber {
+            mtgCards.sort { (card1, card2) in
+                return isSortingNumberAscending ? card1.collector_number < card2.collector_number : card1.collector_number > card2.collector_number
+            }
+        }
     }
+
 }
 
 struct ContentView_Previews: PreviewProvider {

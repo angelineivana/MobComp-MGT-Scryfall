@@ -13,6 +13,8 @@ struct MTGCard: Codable, Identifiable, Hashable, Equatable {
     var lang: String?
     var prices: Prices?
     var legalities: Legality?
+    var collector_number: String
+    var mana_cost: String
     
     struct Prices: Codable {
         var usd: String?
